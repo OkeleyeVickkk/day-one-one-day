@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet } from "react-router";
+import { Toaster } from "sonner";
 import DashboardSidebar from "../common/dashboard-sidebar";
 import DashboardHeader from "../common/dashboard-header";
 
@@ -28,6 +29,14 @@ export default function DashboardLayout() {
 					<Outlet />
 				</main>
 			</div>
+
+			{/* Toast Notifications */}
+			<Toaster
+				position="top-right"
+				toastOptions={{
+					className: "bg-white border border-gray-200 shadow-lg",
+				}}
+			/>
 		</div>
 	);
 }

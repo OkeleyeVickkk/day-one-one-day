@@ -1,160 +1,153 @@
-import { useParams } from "react-router";
 import { useState, useEffect } from "react";
-import { _router } from "../../routes/_router";
+import { Film, HardDrive, Eye, Globe, Upload, Clapperboard } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { useAuth } from "../../contexts/auth-context";
 import UploadSection from "../../components/upload-section";
 import VideoGrid from "../../components/video-grid";
-import { ActionButton } from "../../components/base/action-button";
-import { Spinner } from "../../components/ui/spinner";
-import { Card } from "../../components/ui/card";
+import { formatFileSize } from "../../lib/utils";
 
 interface DashboardStats {
 	totalVideos: number;
-	totalOriginalSize: number;
-	totalCompressedSize: number;
-	totalSavings: number;
-	savingsPercentage: number;
+	totalSpaceSaved: number;
+	totalViews: number;
+	publicVideos: number;
 }
 
 export default function DashboardIndex() {
-	const { username } = useParams<{ username?: string }>();
 	const { user } = useAuth();
-	const [isProfileView, setIsProfileView] = useState(false);
-	const [profileUserId, setProfileUserId] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
+	const [showUpload, setShowUpload] = useState(false);
 	const [stats, setStats] = useState<DashboardStats>({
 		totalVideos: 0,
-		totalOriginalSize: 0,
-		totalCompressedSize: 0,
-		totalSavings: 0,
-		savingsPercentage: 0,
+		totalSpaceSaved: 0,
+		totalViews: 0,
+		publicVideos: 0,
 	});
 
 	useEffect(() => {
-		if (username) {
-			setIsProfileView(true);
-			fetchUserProfile(username);
-		} else {
-			setIsProfileView(false);
-			if (user) {
-				fetchDashboardStats();
-			}
+		if (user) {
+			fetchStats();
 		}
-	}, [username, user]);
+	}, [user]);
 
-	const fetchDashboardStats = async () => {
+	async function fetchStats() {
 		try {
 			if (!user) return;
 
-			const { data, error } = await supabase.from("videos").select("original_size, compressed_size").eq("owner_id", user.id);
+			const { data: videos } = await supabase.from("videos").select("*").eq("owner_id", user.id);
 
-			if (error) throw error;
+			if (videos) {
+				const totalSpaceSaved = videos.reduce((sum, v) => {
+					if (v.original_size && v.compressed_size) {
+						return sum + (v.original_size - v.compressed_size);
+					}
+					return sum;
+				}, 0);
 
-			const videos = data || [];
-			const totalOriginalSize = videos.reduce((sum, v) => sum + (v.original_size || 0), 0);
-			const totalCompressedSize = videos.reduce((sum, v) => sum + v.compressed_size, 0);
-			const totalSavings = totalOriginalSize - totalCompressedSize;
-			const savingsPercentage = totalOriginalSize > 0 ? (totalSavings / totalOriginalSize) * 100 : 0;
+				const publicVideos = videos.filter((v) => v.is_public).length;
+				const totalViews = videos.reduce((sum, v) => sum + (v.views_count || 0), 0);
 
-			setStats({
-				totalVideos: videos.length,
-				totalOriginalSize,
-				totalCompressedSize,
-				totalSavings,
-				savingsPercentage,
-			});
-		} catch (error) {
-			console.error("Error fetching dashboard stats:", error);
-		}
-	};
-
-	const fetchUserProfile = async (username: string) => {
-		try {
-			setLoading(true);
-			const { data, error } = await supabase.from("profiles").select("user_id").eq("username", username).single();
-
-			if (error || !data) {
-				console.error("User not found");
-				return;
+				setStats({
+					totalVideos: videos.length,
+					totalSpaceSaved,
+					totalViews,
+					publicVideos,
+				});
 			}
-
-			setProfileUserId(data.user_id);
 		} catch (error) {
-			console.error("Error fetching profile:", error);
-		} finally {
-			setLoading(false);
+			console.error("Error fetching stats:", error);
 		}
-	};
-
-	const handleUploadComplete = () => {
-		fetchDashboardStats();
-	};
-
-	const formatBytes = (bytes: number) => {
-		if (bytes === 0) return "0 B";
-		const k = 1024;
-		const sizes = ["B", "KB", "MB", "GB"];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-	};
-
-	if (loading) {
-		return <Spinner />;
-	}
-
-	if (isProfileView) {
-		return (
-			<div className="space-y-8">
-				<div className="text-center">
-					<h1 className="text-3xl font-bold text-gray-900 mb-2">@{username}'s Videos</h1>
-					<p className="text-gray-600">Public videos from this user</p>
-				</div>
-
-				{profileUserId && <VideoGrid isPublic={true} userId={profileUserId} showActions={false} />}
-			</div>
-		);
 	}
 
 	return (
-		<div className="space-y-8">
-			<div className="flex justify-end">
-				<div className="flex space-x-4">
-					<ActionButton href={_router.dashboard.settings} variant="outline">
-						Settings
-					</ActionButton>
+		<div className="min-h-screen">
+			{/* Header */}
+			<div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+				<div>
+					<h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+						<Film className="w-8 h-8" /> Video Dashboard
+					</h1>
+					<p className="text-gray-600 mt-2">Manage your compressed videos and track your savings</p>
+				</div>
+
+				<button
+					onClick={() => setShowUpload(true)}
+					className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+					<Upload className="w-4 h-4 mr-2" /> Upload Video
+				</button>
+			</div>
+
+			{/* Stats Cards */}
+			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+				<div className="bg-white p-6 rounded-xl border border-gray-200">
+					<div className="flex items-center">
+						<div className="p-3 bg-blue-100 rounded-lg mr-4">
+							<Film className="w-6 h-6 text-blue-600" />
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Total Videos</p>
+							<p className="text-2xl font-semibold text-gray-900">{stats.totalVideos}</p>
+						</div>
+					</div>
+				</div>
+
+				<div className="bg-white p-6 rounded-xl border border-gray-200">
+					<div className="flex items-center">
+						<div className="p-3 bg-green-100 rounded-lg mr-4">
+							<HardDrive className="w-6 h-6 text-green-600" />
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Space Saved</p>
+							<p className="text-2xl font-semibold text-gray-900">{formatFileSize(stats.totalSpaceSaved)}</p>
+						</div>
+					</div>
+				</div>
+
+				<div className="bg-white p-6 rounded-xl border border-gray-200">
+					<div className="flex items-center">
+						<div className="p-3 bg-purple-100 rounded-lg mr-4">
+							<Eye className="w-6 h-6 text-purple-600" />
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Total Views</p>
+							<p className="text-2xl font-semibold text-gray-900">{stats.totalViews.toLocaleString()}</p>
+						</div>
+					</div>
+				</div>
+
+				<div className="bg-white p-6 rounded-xl border border-gray-200">
+					<div className="flex items-center">
+						<div className="p-3 bg-orange-100 rounded-lg mr-4">
+							<Globe className="w-6 h-6 text-orange-600" />
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Public Videos</p>
+							<p className="text-2xl font-semibold text-gray-900">{stats.publicVideos}</p>
+						</div>
+					</div>
 				</div>
 			</div>
 
-			<UploadSection onUploadComplete={handleUploadComplete} />
+			{/* Upload Modal */}
+			<UploadSection
+				isOpen={showUpload}
+				onOpenChange={setShowUpload}
+				onComplete={() => {
+					setShowUpload(false);
+					fetchStats();
+				}}
+			/>
 
-			{/* Dashboard Statistics */}
-			<div>
-				<h2 className="text-2xl font-semibold text-gray-900 mb-4">Your Statistics</h2>
-				<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-					<Card className="p-6">
-						<div className="text-sm font-medium text-gray-500">Total Videos</div>
-						<div className="text-3xl font-bold text-gray-900 mt-2">{stats.totalVideos}</div>
-					</Card>
-					<Card className="p-6">
-						<div className="text-sm font-medium text-gray-500">Original Size</div>
-						<div className="text-3xl font-bold text-gray-900 mt-2">{formatBytes(stats.totalOriginalSize)}</div>
-					</Card>
-					<Card className="p-6">
-						<div className="text-sm font-medium text-gray-500">Compressed Size</div>
-						<div className="text-3xl font-bold text-gray-900 mt-2">{formatBytes(stats.totalCompressedSize)}</div>
-					</Card>
-					<Card className="p-6">
-						<div className="text-sm font-medium text-gray-500">Space Saved</div>
-						<div className="text-3xl font-bold text-green-600 mt-2">{stats.savingsPercentage.toFixed(1)}%</div>
-						<div className="text-sm text-gray-600 mt-1">{formatBytes(stats.totalSavings)}</div>
-					</Card>
+			{/* Videos Grid */}
+			<div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+				<div className="p-6 border-b border-gray-200">
+					<h2 className="text-xl font-semibold flex items-center gap-2">
+						<Clapperboard className="w-5 h-5" /> Your Videos
+					</h2>
+					<p className="text-gray-600 mt-1">All your compressed videos in one place</p>
 				</div>
-			</div>
-
-			<div>
-				<h2 className="text-2xl font-semibold text-gray-900 mb-4">Your Videos</h2>
-				<VideoGrid />
+				<div className="p-6">
+					<VideoGrid userId={user?.id} showFilters={true} />
+				</div>
 			</div>
 		</div>
 	);

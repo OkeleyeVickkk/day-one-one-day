@@ -4,6 +4,7 @@ type UploadOptions = {
 	name?: string;
 	mimeType?: string;
 	videoId?: string; // optional existing videos table id to update
+	folderId?: string; // Google Drive folder ID to upload file to
 };
 
 /**
@@ -43,12 +44,14 @@ export async function uploadToGoogleDrive(file: File, options: UploadOptions = {
 	}
 	const name = options.name || file.name;
 	const mimeType = options.mimeType || file.type || "application/octet-stream";
+	const folderId = options.folderId || "root";
 
 	const boundary = "-------dood-boundary-" + Date.now();
 
 	const metadata = {
 		name,
 		mimeType,
+		...(folderId && folderId !== "root" && { parents: [folderId] }),
 	};
 
 	const pre = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(

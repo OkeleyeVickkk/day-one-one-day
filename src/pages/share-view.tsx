@@ -68,11 +68,7 @@ export default function ShareView() {
 	const fetchSharedVideosByToken = async (shareToken: string) => {
 		try {
 			// First, find the profile with this share token
-			const { data: profile, error: profileError } = await supabase
-				.from("profiles")
-				.select("user_id")
-				.eq("share_token", shareToken)
-				.single();
+			const { data: profile, error: profileError } = await supabase.from("profiles").select("user_id").eq("share_token", shareToken).single();
 
 			if (profileError || !profile) {
 				setError("This journey is private or the link has expired.");
@@ -153,9 +149,7 @@ export default function ShareView() {
 								</video>
 							</div>
 							<div className="flex items-center justify-between">
-								<div className="text-sm text-gray-500">
-									Size: {formatFileSize(video.compressed_size || 0)}
-								</div>
+								<div className="text-sm text-gray-500">Size: {formatFileSize(video.compressed_size || 0)}</div>
 								{user && video.owner_id === user.id && (
 									<Button onClick={() => handleDownload(video)} variant="outline">
 										Download
@@ -197,7 +191,7 @@ export default function ShareView() {
 						<p className="text-gray-500">No videos in this journey yet.</p>
 					</div>
 				) : (
-					<VideoGrid videos={videos} isPublic={true} showActions={false} />
+					<VideoGrid userId={undefined} showFilters={false} />
 				)}
 			</div>
 		</div>

@@ -1,315 +1,299 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { useAuth } from "../contexts/auth-context";
-import { Spinner } from "../components/ui/spinner";
-import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
-import { Input } from "../components/ui/input";
-
-interface Video {
-	id: string;
-	owner_id: string;
-	title: string;
-	description?: string | null;
-	drive_file_id: string;
-	compressed_size: number | null;
-	original_size?: number | null;
-	compression_ratio?: number | null;
-	created_at: string;
-	is_public: boolean;
-	status: string;
-	views_count: number;
-}
+import VideoCard from "./video-card";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Globe, BarChart3, HardDrive, Eye } from "lucide-react";
 
 interface VideoGridProps {
-	isPublic?: boolean;
 	userId?: string;
-	limit?: number;
-	showActions?: boolean;
-	videos?: Video[];
+	showFilters?: boolean;
+	viewMode?: "grid" | "list";
 }
 
-export default function VideoGrid({ isPublic = false, userId, limit, showActions = true, videos: preloadedVideos }: VideoGridProps) {
-	const { user } = useAuth();
-	const [videos, setVideos] = useState<Video[]>(preloadedVideos || []);
-	const [loading, setLoading] = useState(preloadedVideos ? false : true);
-	const [loadingMore, setLoadingMore] = useState(false);
-	const [hasMore, setHasMore] = useState(true);
-	const [page, setPage] = useState(0);
-	const [filters, setFilters] = useState({
-		dateFrom: "",
-		dateTo: "",
-		sizeMin: "",
-		sizeMax: "",
-		status: "",
-	});
-	const [sortBy, setSortBy] = useState<"created_at" | "compressed_size" | "duration">("created_at");
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+type SortOption = "newest" | "oldest" | "largest" | "smallest" | "most_views";
+type FilterOption = "all" | "public" | "private" | "completed" | "processing";
+
+export default function VideoGrid({ userId, showFilters = true, viewMode: initialViewMode = "grid" }: VideoGridProps) {
+	const [videos, setVideos] = useState<any[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [searchQuery, setSearchQuery] = useState("");
+	const [sortBy, setSortBy] = useState<SortOption>("newest");
+	const [filterBy, setFilterBy] = useState<FilterOption>("all");
+	const [viewMode, setViewMode] = useState<"grid" | "list">(initialViewMode);
 
 	useEffect(() => {
-		if (!preloadedVideos) {
-			fetchVideos(true);
-		}
-	}, [isPublic, userId, filters, sortBy, sortOrder]);
+		fetchVideos();
+	}, [userId, sortBy, filterBy]);
 
-	const fetchVideos = async (reset = false) => {
+	async function fetchVideos() {
 		try {
-			if (reset) {
-				setPage(0);
-				setVideos([]);
-				setHasMore(true);
-			}
-
-			const currentPage = reset ? 0 : page;
-			const pageSize = limit || 12;
+			setLoading(true);
 
 			let query = supabase
 				.from("videos")
 				.select("*")
-				.order(sortBy, { ascending: sortOrder === "asc" });
+				.order("created_at", { ascending: sortBy === "oldest" });
 
-			if (isPublic && userId) {
-				query = query.eq("owner_id", userId).eq("is_public", true);
-			} else if (user) {
-				query = query.eq("owner_id", user.id);
-
-				// Apply filters
-				if (filters.dateFrom) {
-					query = query.gte("created_at", filters.dateFrom);
-				}
-				if (filters.dateTo) {
-					query = query.lte("created_at", filters.dateTo);
-				}
-				if (filters.sizeMin) {
-					query = query.gte("compressed_size", parseInt(filters.sizeMin) * 1024 * 1024);
-				}
-				if (filters.sizeMax) {
-					query = query.lte("compressed_size", parseInt(filters.sizeMax) * 1024 * 1024);
-				}
-				if (filters.status) {
-					query = query.eq("status", filters.status);
-				}
+			// Apply user filter
+			if (userId) {
+				query = query.eq("owner_id", userId);
+			} else {
+				query = query.eq("is_public", true);
 			}
 
-			// Pagination
-			query = query.range(currentPage * pageSize, (currentPage + 1) * pageSize - 1);
+			// Apply status filter
+			if (filterBy === "completed") {
+				query = query.eq("status", "completed");
+			} else if (filterBy === "processing") {
+				query = query.eq("status", "processing");
+			} else if (filterBy === "public") {
+				query = query.eq("is_public", true);
+			} else if (filterBy === "private") {
+				query = query.eq("is_public", false);
+			}
+
+			// Apply sorting
+			if (sortBy === "largest") {
+				query = query.order("original_size", { ascending: false });
+			} else if (sortBy === "smallest") {
+				query = query.order("original_size", { ascending: true });
+			} else if (sortBy === "most_views") {
+				query = query.order("views_count", { ascending: false });
+			}
 
 			const { data, error } = await query;
+
 			if (error) throw error;
 
-			const newVideos = data || [];
-			setVideos((prev) => (reset ? newVideos : [...prev, ...newVideos]));
-			setHasMore(newVideos.length === pageSize);
-
-			if (!reset) {
-				setPage((prev) => prev + 1);
+			// Apply search filter client-side
+			let filteredData = data || [];
+			if (searchQuery) {
+				filteredData = filteredData.filter(
+					(video) =>
+						video.title.toLowerCase().includes(searchQuery.toLowerCase()) || video.description?.toLowerCase().includes(searchQuery.toLowerCase())
+				);
 			}
+
+			setVideos(filteredData);
 		} catch (error) {
 			console.error("Error fetching videos:", error);
+			alert("Failed to load videos");
 		} finally {
 			setLoading(false);
-			setLoadingMore(false);
 		}
+	}
+
+	const handleVideoDeleted = (deletedVideoId: string) => {
+		setVideos((prev) => prev.filter((video) => video.id !== deletedVideoId));
 	};
 
-	const handleDownload = async (video: Video) => {
-		try {
-			// Only allow download for video owner
-			if (!user || video.owner_id !== user.id) {
-				alert("You can only download your own videos");
-				return;
-			}
-
-			// Create download link for Google Drive file
-			const downloadUrl = `https://drive.google.com/uc?export=download&id=${video.drive_file_id}`;
-			const link = document.createElement("a");
-			link.href = downloadUrl;
-			link.download = `video_${video.id}.mp4`;
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-		} catch (error) {
-			console.error("Error downloading video:", error);
-			alert("Failed to download video");
-		}
+	const handleVideoShared = () => {
+		// Optional: Update UI or show confirmation
 	};
 
-	const handleShare = async (video: Video) => {
-		try {
-			// Make video public and generate share link
-			const { error } = await supabase.from("videos").update({ is_public: true }).eq("id", video.id).eq("owner_id", user?.id);
-
-			if (error) throw error;
-
-			// Generate shareable link
-			const shareUrl = `${window.location.origin}/v/${video.id}`;
-			await navigator.clipboard.writeText(shareUrl);
-			alert("Share link copied to clipboard! Video is now public.");
-
-			// Update local state
-			setVideos((prev) => prev.map((v) => (v.id === video.id ? { ...v, is_public: true } : v)));
-		} catch (error) {
-			console.error("Error sharing video:", error);
-			alert("Failed to share video");
-		}
+	const handlePrivacyToggled = (videoId: string, isPublic: boolean) => {
+		setVideos((prev) => prev.map((video) => (video.id === videoId ? { ...video, is_public: isPublic } : video)));
 	};
 
-	const handleDelete = async (video: Video) => {
-		if (!confirm("Are you sure you want to delete this video?")) return;
+	const getStats = () => {
+		const totalVideos = videos.length;
+		const totalSize = videos.reduce((sum, v) => sum + (v.original_size || 0), 0);
+		const compressedSize = videos.reduce((sum, v) => sum + (v.compressed_size || 0), 0);
+		const savedSpace = totalSize - compressedSize;
+		const publicVideos = videos.filter((v) => v.is_public).length;
 
-		try {
-			const { error } = await supabase.from("videos").delete().eq("id", video.id).eq("owner_id", user?.id);
-
-			if (error) throw error;
-
-			// Update local state
-			setVideos((prev) => prev.filter((v) => v.id !== video.id));
-		} catch (error) {
-			console.error("Error deleting video:", error);
-			alert("Failed to delete video");
-		}
+		return {
+			totalVideos,
+			totalSize,
+			compressedSize,
+			savedSpace,
+			publicVideos,
+		};
 	};
 
-	const loadMore = useCallback(() => {
-		if (!loadingMore && hasMore) {
-			setLoadingMore(true);
-			fetchVideos(false);
-		}
-	}, [loadingMore, hasMore, fetchVideos]);
-
-	const getVideoUrl = (video: Video) => {
-		// Use Google Drive view URL
-		return `https://drive.google.com/file/d/${video.drive_file_id}/view`;
-	};
-
-	const formatDate = (dateString: string) => {
-		const date = new Date(dateString);
-		return date.toLocaleDateString("en-US", {
-			year: "numeric",
-			month: "long",
-			day: "numeric",
-			weekday: "long",
-		});
-	};
-
-	const formatFileSize = (bytes: number) => {
-		const mb = bytes / (1024 * 1024);
-		return `${mb.toFixed(1)} MB`;
-	};
-
-	const getCompressionRatio = (originalSize?: number, compressedSize?: number) => {
-		if (!originalSize || !compressedSize) return null;
-		const ratio = ((originalSize - compressedSize) / originalSize) * 100;
-		return ratio.toFixed(1);
-	};
-
-	const handleFilterChange = (key: string, value: string) => {
-		setFilters((prev) => ({ ...prev, [key]: value }));
-	};
-
-	const handleSortChange = (newSortBy: typeof sortBy) => {
-		if (sortBy === newSortBy) {
-			setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
-		} else {
-			setSortBy(newSortBy);
-			setSortOrder("desc");
-		}
-	};
+	const stats = getStats();
 
 	if (loading) {
-		return <Spinner />;
+		return (
+			<div className={`${viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" : "space-y-4"} gap-6`}>
+				{[...Array(6)].map((_, i) => (
+					<div key={i} className="animate-pulse">
+						<div className="aspect-video bg-gray-200 rounded-xl mb-4"></div>
+						<div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+						<div className="h-3 bg-gray-200 rounded w-1/2"></div>
+					</div>
+				))}
+			</div>
+		);
 	}
 
 	return (
 		<div className="space-y-6">
-			{/* Filters */}
-			{!isPublic && (
-				<Card className="p-4">
-					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-						<div>
-							<label className="block text-sm font-medium text-gray-700 mb-1">Date From</label>
-							<Input type="date" value={filters.dateFrom} onChange={(e) => handleFilterChange("dateFrom", e.target.value)} />
-						</div>
-						<div>
-							<label className="block text-sm font-medium text-gray-700 mb-1">Date To</label>
-							<Input type="date" value={filters.dateTo} onChange={(e) => handleFilterChange("dateTo", e.target.value)} />
-						</div>
-						<div>
-							<label className="block text-sm font-medium text-gray-700 mb-1">Min Size (MB)</label>
-							<Input type="number" value={filters.sizeMin} onChange={(e) => handleFilterChange("sizeMin", e.target.value)} placeholder="0" />
-						</div>
-						<div>
-							<label className="block text-sm font-medium text-gray-700 mb-1">Max Size (MB)</label>
-							<Input type="number" value={filters.sizeMax} onChange={(e) => handleFilterChange("sizeMax", e.target.value)} placeholder="100" />
-						</div>
-					</div>
-					<div className="mt-4 flex gap-2">
-						<Button variant={sortBy === "created_at" ? "default" : "outline"} size="sm" onClick={() => handleSortChange("created_at")}>
-							Date {sortBy === "created_at" && (sortOrder === "desc" ? "↓" : "↑")}
-						</Button>
-						<Button variant={sortBy === "compressed_size" ? "default" : "outline"} size="sm" onClick={() => handleSortChange("compressed_size")}>
-							Size {sortBy === "compressed_size" && (sortOrder === "desc" ? "↓" : "↑")}
-						</Button>
-						<Button variant={sortBy === "duration" ? "default" : "outline"} size="sm" onClick={() => handleSortChange("duration")}>
-							Duration {sortBy === "duration" && (sortOrder === "desc" ? "↓" : "↑")}
-						</Button>
-					</div>
-				</Card>
-			)}
-
-			{/* Video Grid */}
-			{videos.length === 0 ? (
-				<div className="text-center py-12">
-					<p className="text-gray-500 text-lg">{isPublic ? "No public videos found." : "No videos found matching your criteria."}</p>
-				</div>
-			) : (
-				<>
-					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-						{videos.map((video) => (
-							<Card key={video.id} className="overflow-hidden">
-								<div className="aspect-video bg-gray-100">
-									<video className="w-full h-full object-cover" controls preload="metadata" src={getVideoUrl(video)}>
-										Your browser does not support the video tag.
-									</video>
-								</div>
-								<div className="p-4">
-									<div className="flex items-start justify-between mb-2">
-										<h3 className="font-semibold text-gray-900 truncate">{video.title}</h3>
-										{video.is_public && <Badge variant="secondary">Public</Badge>}
-									</div>
-									<p className="text-xs text-gray-400 mb-2">{formatDate(video.created_at)}</p>
-									<div className="text-sm text-gray-500 space-y-1 mb-3">
-										<p>Size: {formatFileSize(video.compressed_size || 0)}</p>
-										{video.original_size && <p>Compression: {getCompressionRatio(video.original_size, video.compressed_size || 0)}% saved</p>}
-									</div>
-									{showActions && user && video.owner_id === user.id && (
-										<div className="flex gap-2">
-											<Button size="sm" variant="outline" onClick={() => handleDownload(video)}>
-												Download
-											</Button>
-											<Button size="sm" variant="outline" onClick={() => handleShare(video)}>
-												{video.is_public ? "Copy Link" : "Share"}
-											</Button>
-											<Button size="sm" variant="destructive" onClick={() => handleDelete(video)}>
-												Delete
-											</Button>
-										</div>
-									)}
-								</div>
-							</Card>
-						))}
+			{/* Header with Stats & Controls */}
+			<div className="bg-white rounded-xl border border-gray-200 p-6">
+				<div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+					<div>
+						<h2 className="text-xl font-semibold text-gray-900">{userId ? "My Videos" : "Public Videos"}</h2>
+						<p className="text-gray-600 mt-1">
+							{videos.length} video{videos.length !== 1 ? "s" : ""} • Saved {Math.round(stats.savedSpace / 1024 / 1024)}MB of space
+						</p>
 					</div>
 
-					{/* Load More */}
-					{hasMore && (
-						<div className="text-center py-4">
-							<Button onClick={loadMore} disabled={loadingMore} variant="outline">
-								{loadingMore ? <Spinner /> : "Load More"}
+					<div className="flex items-center space-x-4">
+						{/* View Toggle */}
+						<div className="flex items-center bg-gray-100 rounded-lg p-1">
+							<Button variant={viewMode === "grid" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("grid")} title="Grid view">
+								⊞
+							</Button>
+							<Button variant={viewMode === "list" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("list")} title="List view">
+								☰
 							</Button>
 						</div>
-					)}
-				</>
+					</div>
+				</div>
+
+				{/* Filters */}
+				{showFilters && (
+					<div className="mt-6 flex flex-col md:flex-row gap-4">
+						{/* Search */}
+						<div className="flex-1 relative">
+							<Input
+								type="text"
+								placeholder="Search videos..."
+								value={searchQuery}
+								onChange={(e) => setSearchQuery(e.target.value)}
+								className="pl-10"
+							/>
+							<div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">🔍</div>
+						</div>
+
+						{/* Sort Dropdown */}
+						<Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
+							<SelectTrigger className="w-48">
+								<SelectValue placeholder="Sort by" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="newest">Newest First</SelectItem>
+								<SelectItem value="oldest">Oldest First</SelectItem>
+								<SelectItem value="largest">Largest Size</SelectItem>
+								<SelectItem value="smallest">Smallest Size</SelectItem>
+								<SelectItem value="most_views">Most Views</SelectItem>
+							</SelectContent>
+						</Select>
+
+						{/* Filter Dropdown */}
+						<Select value={filterBy} onValueChange={(value) => setFilterBy(value as FilterOption)}>
+							<SelectTrigger className="w-48">
+								<SelectValue placeholder="Filter by" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All Videos</SelectItem>
+								{userId && <SelectItem value="public">Public Only</SelectItem>}
+								{userId && <SelectItem value="private">Private Only</SelectItem>}
+								<SelectItem value="completed">Completed</SelectItem>
+								<SelectItem value="processing">Processing</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+				)}
+
+				{/* Stats Grid */}
+				<div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+					<div className="bg-blue-50 rounded-lg p-4">
+						<div className="flex items-center">
+							<div className="p-2 bg-blue-100 rounded-lg mr-3">
+								<HardDrive className="w-5 h-5 text-blue-600" />
+							</div>
+							<div>
+								<p className="text-sm text-gray-600">Total Space Saved</p>
+								<p className="text-xl font-semibold text-gray-900">{Math.round(stats.savedSpace / 1024 / 1024)}MB</p>
+							</div>
+						</div>
+					</div>
+
+					<div className="bg-green-50 rounded-lg p-4">
+						<div className="flex items-center">
+							<div className="p-2 bg-green-100 rounded-lg mr-3">
+								<Eye className="w-5 h-5 text-green-600" />
+							</div>
+							<div>
+								<p className="text-sm text-gray-600">Total Views</p>
+								<p className="text-xl font-semibold text-gray-900">{videos.reduce((sum, v) => sum + v.views_count, 0).toLocaleString()}</p>
+							</div>
+						</div>
+					</div>
+
+					<div className="bg-purple-50 rounded-lg p-4">
+						<div className="flex items-center">
+							<div className="p-2 bg-purple-100 rounded-lg mr-3">
+								<Globe className="w-5 h-5 text-purple-600" />
+							</div>
+							<div>
+								<p className="text-sm text-gray-600">Public Videos</p>
+								<p className="text-xl font-semibold text-gray-900">{stats.publicVideos}</p>
+							</div>
+						</div>
+					</div>
+
+					<div className="bg-orange-50 rounded-lg p-4">
+						<div className="flex items-center">
+							<div className="p-2 bg-orange-100 rounded-lg mr-3">
+								<BarChart3 className="w-5 h-5 text-orange-600" />
+							</div>
+							<div>
+								<p className="text-sm text-gray-600">Avg. Compression</p>
+								<p className="text-xl font-semibold text-gray-900">
+									{videos.length > 0
+										? Math.round(
+												videos.reduce((sum, v) => {
+													if (v.original_size && v.compressed_size) {
+														return sum + ((v.original_size - v.compressed_size) / v.original_size) * 100;
+													}
+													return sum;
+												}, 0) / videos.length
+										  )
+										: 0}
+									%
+								</p>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			{/* Videos Grid/List */}
+			{videos.length === 0 ? (
+				<div className="text-center py-12 bg-white rounded-xl border border-gray-200">
+					<div className="max-w-md mx-auto">
+						<div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">🔍</div>
+						<h3 className="text-lg font-medium text-gray-900 mb-2">No videos found</h3>
+						<p className="text-gray-600">
+							{searchQuery || filterBy !== "all"
+								? "Try changing your search or filters"
+								: userId
+								? "Upload your first video to get started"
+								: "No public videos available yet"}
+						</p>
+					</div>
+				</div>
+			) : (
+				<div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "space-y-4"}>
+					{videos.map((video) => (
+						<div key={video.id} className={viewMode === "list" ? "max-w-full" : ""}>
+							<VideoCard
+								video={video}
+								isOwner={!!userId}
+								onDelete={handleVideoDeleted}
+								onShare={handleVideoShared}
+								onTogglePrivacy={handlePrivacyToggled}
+								onFolderChange={() => fetchVideos()}
+								viewMode={viewMode}
+							/>
+						</div>
+					))}
+				</div>
 			)}
 		</div>
 	);
