@@ -1,10 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../contexts/auth-context";
-import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { ActionButton } from "./base/action-button";
-import { LoadingSpinner } from "./loading-spinner";
+import { Spinner } from "../components/ui/spinner";
+import { uploadToGoogleDrive } from "../lib/google-drive";
 
 interface UploadSectionProps {
 	onUploadComplete: () => void;
@@ -13,7 +12,6 @@ interface UploadSectionProps {
 export default function UploadSection({ onUploadComplete }: UploadSectionProps) {
 	const { user } = useAuth();
 	const [isRecording, setIsRecording] = useState(false);
-	const [isCompressing, setIsCompressing] = useState(false);
 	const [isUploading, setIsUploading] = useState(false);
 	const [progress, setProgress] = useState<string>("");
 	const [error, setError] = useState<string | null>(null);
@@ -22,18 +20,6 @@ export default function UploadSection({ onUploadComplete }: UploadSectionProps) 
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 	const streamRef = useRef<MediaStream | null>(null);
-	const ffmpegRef = useRef<FFmpeg>(new FFmpeg());
-
-	const loadFFmpeg = useCallback(async () => {
-		const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd";
-		ffmpegRef.current.on("log", ({ message }) => {
-			console.log(message);
-		});
-		await ffmpegRef.current.load({
-			coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-			wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-		});
-	}, []);
 
 	const startRecording = async () => {
 		try {
@@ -107,90 +93,44 @@ export default function UploadSection({ onUploadComplete }: UploadSectionProps) 
 	};
 
 	const processVideo = async (blob: Blob) => {
-		setIsCompressing(true);
-		setProgress("Compressing video...");
-
-		try {
-			await loadFFmpeg();
-
-			const inputFileName = "input.webm";
-			const outputFileName = "output.mp4";
-
-			await ffmpegRef.current.writeFile(inputFileName, await fetchFile(blob));
-
-			await ffmpegRef.current.exec([
-				"-i",
-				inputFileName,
-				"-c:v",
-				"libx264",
-				"-preset",
-				"slow",
-				"-crf",
-				"28",
-				"-c:a",
-				"aac",
-				"-b:a",
-				"128k",
-				"-movflags",
-				"+faststart",
-				outputFileName,
-			]);
-
-			const data = await ffmpegRef.current.readFile(outputFileName);
-			const compressedBlob = new Blob([data as any], { type: "video/mp4" });
-
-			await uploadVideo(compressedBlob);
-		} catch (error) {
-			console.error("Error compressing video:", error);
-			setError("Failed to compress video");
-			setIsCompressing(false);
-		}
+		// Skip compression - upload directly
+		await uploadVideo(blob);
 	};
 
 	const uploadVideo = async (blob: Blob) => {
-		setIsCompressing(false);
 		setIsUploading(true);
-		setProgress("Uploading video...");
+		setProgress("Saving your video...");
 
 		try {
 			if (!user) throw new Error("Not authenticated");
 
 			const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-			const fileName = `${user.id}/${today}.mp4`;
+			const fileName = `${user.id}_${today}.mp4`;
 
-			// Check if video already exists for today
-			const { data: existingVideo } = await supabase.from("daily_videos").select("id").eq("user_id", user.id).eq("date", today).single();
+			// Create File from Blob
+			const file = new File([blob], fileName, { type: "video/mp4" });
 
-			if (existingVideo) {
-				setError("You've already uploaded a video for today");
-				setIsUploading(false);
-				return;
-			}
-
-			// Upload to storage
-			const { error: uploadError } = await supabase.storage.from("daily-videos").upload(fileName, blob, {
-				contentType: "video/mp4",
-				upsert: true,
+			// Upload to Google Drive
+			const { driveFileId } = await uploadToGoogleDrive(file, {
+				name: fileName,
+				mimeType: "video/mp4",
 			});
 
-			if (uploadError) throw uploadError;
-
-			// Get video duration
-			const duration = await getVideoDuration(blob);
-
-			// Insert record
-			const { error: insertError } = await supabase.from("daily_videos").insert({
-				user_id: user.id,
-				date: today,
-				video_path: fileName,
-				duration: Math.floor(duration),
+			// Insert record into videos table
+			const { error: insertError } = await supabase.from("videos").insert({
+				owner_id: user.id,
+				title: `Video from ${new Date().toLocaleDateString()}`,
+				drive_file_id: driveFileId,
 				compressed_size: blob.size,
+				status: "completed",
 			});
 
 			if (insertError) throw insertError;
 
-			setProgress("Upload complete!");
-			onUploadComplete();
+			setProgress("Done! Your video is ready.");
+			setTimeout(() => {
+				onUploadComplete();
+			}, 1500);
 		} catch (error: any) {
 			console.error("Error uploading video:", error);
 			setError(error.message);
@@ -198,17 +138,6 @@ export default function UploadSection({ onUploadComplete }: UploadSectionProps) 
 			setIsUploading(false);
 			setSelectedFile(null);
 		}
-	};
-
-	const getVideoDuration = (blob: Blob): Promise<number> => {
-		return new Promise((resolve) => {
-			const video = document.createElement("video");
-			video.preload = "metadata";
-			video.onloadedmetadata = () => {
-				resolve(video.duration);
-			};
-			video.src = URL.createObjectURL(blob);
-		});
 	};
 
 	const handleUploadFile = async () => {
@@ -223,10 +152,19 @@ export default function UploadSection({ onUploadComplete }: UploadSectionProps) 
 
 			{error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">{error}</div>}
 
-			{(isCompressing || isUploading) && <div className="mb-4 p-3 bg-blue-100 border border-blue-400 text-blue-700 rounded">{progress}</div>}
+			{isUploading && (
+				<div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+					<div className="flex items-center space-x-3">
+						<Spinner />
+						<div>
+							<p className="text-blue-900 font-medium">{progress}</p>
+							<p className="text-blue-700 text-sm">Please keep your browser open</p>
+						</div>
+					</div>
+				</div>
+			)}
 
 			<div className="space-y-4">
-				{/* Recording Section */}
 				<div>
 					<h3 className="font-medium text-gray-700 mb-2">Record from Camera</h3>
 					<div className="flex items-center space-x-4">
@@ -260,7 +198,7 @@ export default function UploadSection({ onUploadComplete }: UploadSectionProps) 
 								hover:file:bg-blue-100"
 						/>
 						{selectedFile && (
-							<ActionButton onClick={handleUploadFile} disabled={isCompressing || isUploading}>
+							<ActionButton onClick={handleUploadFile} disabled={isUploading}>
 								Upload
 							</ActionButton>
 						)}
@@ -268,13 +206,6 @@ export default function UploadSection({ onUploadComplete }: UploadSectionProps) 
 					<p className="text-sm text-gray-500 mt-1">Max 90 seconds, any video format</p>
 				</div>
 			</div>
-
-			{(isCompressing || isUploading) && (
-				<div className="mt-4 flex items-center space-x-2">
-					<LoadingSpinner />
-					<span className="text-sm text-gray-600">{progress}</span>
-				</div>
-			)}
 		</div>
 	);
 }

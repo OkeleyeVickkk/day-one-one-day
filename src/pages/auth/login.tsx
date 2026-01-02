@@ -4,9 +4,10 @@ import { useNavigate } from "react-router";
 import { _router } from "../../routes/_router";
 import { useAuth } from "../../contexts/auth-context";
 import GoogleSignInButton from "../../components/common/google-signin-button";
+import GoogleDriveButton from "../../components/common/google-drive-button";
 import { ActionButton } from "../../components/base/action-button";
 import CustomInput from "../../components/base/custom-input";
-import { LoadingSpinner } from "../../components/loading-spinner";
+import { Spinner } from "../../components/ui/spinner";
 
 export default function LoginPage() {
 	const { user, loading: authLoading } = useAuth();
@@ -43,7 +44,7 @@ export default function LoginPage() {
 
 			if (error) throw error;
 
-			// AuthContext will handle the state update and navigation
+			navigate(_router.dashboard.index);
 		} catch (err: any) {
 			setError(err.message || "Failed to sign in. Please try again.");
 		} finally {
@@ -74,14 +75,6 @@ export default function LoginPage() {
 			setLoading(false);
 		}
 	};
-
-	if (authLoading) {
-		return (
-			<div className="flex items-center justify-center min-h-screen">
-				<LoadingSpinner />
-			</div>
-		);
-	}
 
 	return (
 		<div className="space-y-6">
@@ -141,7 +134,7 @@ export default function LoginPage() {
 				<ActionButton type="submit" className="w-full" disabled={loading}>
 					{loading ? (
 						<>
-							<LoadingSpinner />
+							<Spinner />
 							<span>Signing in...</span>
 						</>
 					) : (
@@ -160,6 +153,9 @@ export default function LoginPage() {
 			</div>
 
 			<GoogleSignInButton onSuccess={handleGoogleLogin} text="signin_with" />
+			<div className="space-y-3">
+				<GoogleDriveButton />
+			</div>
 
 			<p className="text-center text-sm text-gray-600">
 				Don't have an account?{" "}

@@ -9,7 +9,7 @@ export default function DashboardLayout() {
 	return (
 		<div className="flex h-screen bg-gray-100">
 			{/* Mobile sidebar overlay */}
-			{sidebarOpen && <div className="fixed inset-0 z-40 bg-black bg-opacity-50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+			{sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
 			{/* Sidebar */}
 			<div

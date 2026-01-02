@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabaseClient";
 import { _router } from "../../routes/_router";
 import CustomInput from "../../components/base/custom-input";
 import { ActionButton } from "../../components/base/action-button";
-import { LoadingSpinner } from "../../components/loading-spinner";
+import { Spinner } from "../../components/ui/spinner";
 
 export default function EmailVerificationPage() {
 	const [email, setEmail] = useState("");
@@ -81,7 +81,7 @@ export default function EmailVerificationPage() {
 				<ActionButton type="button" onClick={handleResend} disabled={isLoading || resendTimer > 0} className="w-full">
 					{isLoading ? (
 						<>
-							<LoadingSpinner />
+							<Spinner />
 							<span>Sending...</span>
 						</>
 					) : resendTimer > 0 ? (

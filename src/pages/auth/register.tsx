@@ -6,7 +6,7 @@ import { _router } from "../../routes/_router";
 import GoogleSignInButton from "../../components/common/google-signin-button";
 import CustomInput from "../../components/base/custom-input";
 import { ActionButton } from "../../components/base/action-button";
-import { LoadingSpinner } from "../../components/loading-spinner";
+import { Spinner } from "../../components/ui/spinner";
 
 const PASSWORD_MIN_LENGTH = 8;
 
@@ -207,7 +207,7 @@ export default function RegisterPage() {
 				<ActionButton type="submit" className="w-full" disabled={loading}>
 					{loading ? (
 						<>
-							<LoadingSpinner />
+							<Spinner />
 							<span>Creating account...</span>
 						</>
 					) : (

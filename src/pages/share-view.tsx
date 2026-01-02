@@ -1,98 +1,29 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router";
 import { supabase } from "../lib/supabaseClient";
-import { LoadingSpinner } from "../components/loading-spinner";
+import { useAuth } from "../contexts/auth-context";
+import { Spinner } from "../components/ui/spinner";
+import { Button } from "../components/ui/button";
+import VideoGrid from "../components/video-grid";
 
 interface Video {
 	id: string;
-	date: string;
-	video_path: string;
-	duration: number;
-	compressed_size: number;
+	title: string;
+	drive_file_id: string;
+	compressed_size: number | null;
 	created_at: string;
+	is_public: boolean;
+	owner_id: string;
+	status: string;
+	views_count: number;
 }
 
 export default function ShareView() {
-	const { token } = useParams<{ token: string }>();
+	const { token, share_hash } = useParams<{ token?: string; share_hash?: string }>();
+	const { user } = useAuth();
 	const [videos, setVideos] = useState<Video[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-
-	useEffect(() => {
-		if (token) {
-			fetchSharedVideos(token);
-		}
-	}, [token]);
-
-	const fetchSharedVideos = async (shareToken: string) => {
-		try {
-			// First, find the profile with this share token
-			const { data: profile, error: profileError } = await supabase
-				.from("profiles")
-				.select("user_id, share_enabled")
-				.eq("share_token", shareToken)
-				.eq("share_enabled", true)
-				.single();
-
-			if (profileError || !profile) {
-				setError("This journey is private or the link has expired.");
-				return;
-			}
-
-			// Fetch all videos for this user
-			const { data: videosData, error: videosError } = await supabase
-				.from("daily_videos")
-				.select("*")
-				.eq("user_id", profile.user_id)
-				.order("date", { ascending: true });
-
-			if (videosError) throw videosError;
-
-			setVideos(videosData || []);
-
-			// Generate signed URLs for all videos
-			if (videosData) {
-				const urls: Record<string, string> = {};
-				for (const video of videosData) {
-					const { data: signedUrlData } = await supabase.storage.from("daily-videos").createSignedUrl(video.video_path, 86400); // 24 hours
-
-					if (signedUrlData?.signedUrl) {
-						urls[video.id] = signedUrlData.signedUrl;
-					}
-				}
-				setSignedUrls(urls);
-			}
-		} catch (error) {
-			console.error("Error fetching shared videos:", error);
-			setError("Failed to load the shared journey.");
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	const getVideoUrl = (videoId: string) => {
-		return signedUrls[videoId] || "";
-	};
-
-	if (loading) {
-		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<LoadingSpinner />
-			</div>
-		);
-	}
-
-	if (error) {
-		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<div className="text-center">
-					<h1 className="text-2xl font-bold text-gray-900 mb-4">Journey Not Found</h1>
-					<p className="text-gray-600">{error}</p>
-				</div>
-			</div>
-		);
-	}
 
 	const formatDate = (dateString: string) => {
 		const date = new Date(dateString);
@@ -103,11 +34,146 @@ export default function ShareView() {
 		});
 	};
 
+	const formatFileSize = (bytes: number) => {
+		const mb = bytes / (1024 * 1024);
+		return `${mb.toFixed(1)} MB`;
+	};
+
+	const getVideoUrl = (video: Video) => {
+		return `https://drive.google.com/file/d/${video.drive_file_id}/view`;
+	};
+
+	const handleDownload = async (video: Video) => {
+		// Only allow download for video owner
+		if (!user || video.owner_id !== user.id) {
+			alert("You can only download videos you own");
+			return;
+		}
+
+		const downloadUrl = `https://drive.google.com/uc?export=download&id=${video.drive_file_id}`;
+		const link = document.createElement("a");
+		link.href = downloadUrl;
+		link.download = `video_${video.id}.mp4`;
+		link.click();
+	};
+
+	useEffect(() => {
+		if (token) {
+			fetchSharedVideosByToken(token);
+		} else if (share_hash) {
+			fetchSharedVideoByHash(share_hash);
+		}
+	}, [token, share_hash]);
+
+	const fetchSharedVideosByToken = async (shareToken: string) => {
+		try {
+			// First, find the profile with this share token
+			const { data: profile, error: profileError } = await supabase
+				.from("profiles")
+				.select("user_id")
+				.eq("share_token", shareToken)
+				.single();
+
+			if (profileError || !profile) {
+				setError("This journey is private or the link has expired.");
+				return;
+			}
+
+			// Fetch all videos for this user
+			const { data: videosData, error: videosError } = await supabase
+				.from("videos")
+				.select("*")
+				.eq("user_id", profile.user_id)
+				.order("created_at", { ascending: true });
+
+			if (videosError) throw videosError;
+
+			setVideos(videosData || []);
+		} catch (error) {
+			console.error("Error fetching shared videos:", error);
+			setError("Failed to load the shared journey.");
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	const fetchSharedVideoByHash = async (shareHash: string) => {
+		try {
+			// Find the video by share_hash (assuming id is used as share_hash)
+			const { data: video, error: videoError } = await supabase.from("videos").select("*").eq("id", shareHash).eq("is_public", true).single();
+
+			if (videoError || !video) {
+				setError("This video is private or doesn't exist.");
+				return;
+			}
+
+			// Track view count
+			await supabase.rpc("record_video_view", { video_id: video.id });
+
+			setVideos([video]);
+		} catch (error) {
+			console.error("Error fetching shared video:", error);
+			setError("Failed to load the shared video.");
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	if (loading) {
+		return (
+			<div className="min-h-screen flex items-center justify-center">
+				<Spinner />
+			</div>
+		);
+	}
+
+	if (error) {
+		return (
+			<div className="min-h-screen flex items-center justify-center">
+				<div className="text-center">
+					<h1 className="text-2xl font-bold text-gray-900 mb-4">Video Not Found</h1>
+					<p className="text-gray-600">{error}</p>
+				</div>
+			</div>
+		);
+	}
+
+	// Single video view
+	if (share_hash && videos.length === 1) {
+		const video = videos[0];
+		return (
+			<div className="min-h-screen bg-gray-50">
+				<div className="max-w-4xl mx-auto px-4 py-8">
+					<div className="bg-white rounded-lg shadow-md overflow-hidden">
+						<div className="p-4">
+							<h1 className="text-2xl font-bold text-gray-900 mb-4">{formatDate(video.created_at)}</h1>
+							<div className="aspect-video bg-gray-100 rounded mb-4">
+								<video className="w-full h-full object-cover" controls preload="metadata" src={getVideoUrl(video)}>
+									Your browser does not support the video tag.
+								</video>
+							</div>
+							<div className="flex items-center justify-between">
+								<div className="text-sm text-gray-500">
+									Size: {formatFileSize(video.compressed_size || 0)}
+								</div>
+								{user && video.owner_id === user.id && (
+									<Button onClick={() => handleDownload(video)} variant="outline">
+										Download
+									</Button>
+								)}
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	const getJourneyTitle = () => {
 		if (videos.length === 0) return "A Journey";
 
-		const startDate = new Date(videos[0].date);
-		const endDate = new Date(videos[videos.length - 1].date);
+		const startDate = new Date(videos[0].created_at);
+		const endDate = new Date(videos[videos.length - 1].created_at);
 		const startYear = startDate.getFullYear();
 		const endYear = endDate.getFullYear();
 
@@ -131,23 +197,7 @@ export default function ShareView() {
 						<p className="text-gray-500">No videos in this journey yet.</p>
 					</div>
 				) : (
-					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-						{videos.map((video) => (
-							<div key={video.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-								<div className="p-4">
-									<h3 className="font-semibold text-gray-900 mb-2">{formatDate(video.date)}</h3>
-									<div className="aspect-video bg-gray-100 rounded">
-										<video className="w-full h-full object-cover" controls preload="metadata" src={getVideoUrl(video.id)}>
-											Your browser does not support the video tag.
-										</video>
-									</div>
-									<div className="mt-2 text-sm text-gray-500">
-										Duration: {Math.floor(video.duration / 60)}:{(video.duration % 60).toString().padStart(2, "0")}
-									</div>
-								</div>
-							</div>
-						))}
-					</div>
+					<VideoGrid videos={videos} isPublic={true} showActions={false} />
 				)}
 			</div>
 		</div>

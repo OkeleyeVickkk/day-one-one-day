@@ -1,35 +1,6 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
-import { useAuth } from "../../contexts/auth-context";
 import { _router } from "../../routes/_router";
 
 export default function Index() {
-	const { user, loading } = useAuth();
-	const navigate = useNavigate();
-	const [isInitializing, setIsInitializing] = useState(true);
-
-	useEffect(() => {
-		// Once auth loading is done, redirect if user exists
-		if (!loading) {
-			setIsInitializing(false);
-			if (user) {
-				navigate(_router.dashboard.index);
-			}
-		}
-	}, [user, loading, navigate]);
-
-	if (isInitializing || loading) {
-		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-			</div>
-		);
-	}
-
-	if (user) {
-		return null; // Will redirect
-	}
-
 	return (
 		<div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
 			<div className="max-w-4xl mx-auto text-center">

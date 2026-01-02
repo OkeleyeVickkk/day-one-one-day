@@ -8,8 +8,8 @@ import RegisterPage from "../pages/auth/register";
 import EmailVerificationPage from "../pages/auth/email-verification";
 import ForgotPasswordPage from "../pages/auth/forgot-password";
 import PasswordResetPage from "../pages/auth/password-reset";
+import OAuthCallback from "../pages/auth/callback";
 import DashboardLayout from "../components/layouts/dashboard-layout";
-import NotFoundPage from "../pages/not-found";
 import DashboardIndex from "../pages/dashboard";
 import ShareView from "../pages/share-view";
 import { ProtectedRoute } from "../components/protected-route";
@@ -50,6 +50,10 @@ export const appRouter = createBrowserRouter([
 				path: _router.auth.passwordReset,
 				Component: () => <PasswordResetPage />,
 			},
+			{
+				path: _router.auth.callback,
+				Component: () => <OAuthCallback />,
+			},
 		],
 	},
 	{
@@ -63,10 +67,11 @@ export const appRouter = createBrowserRouter([
 		children: [
 			{
 				index: true,
+				path: _router.dashboard.index,
 				Component: DashboardIndex,
 			},
 			{
-				index: true,
+				path: _router.dashboard.settings,
 				Component: Settings,
 			},
 		],
@@ -76,7 +81,11 @@ export const appRouter = createBrowserRouter([
 		Component: () => <ShareView />,
 	},
 	{
-		path: _router.notFound,
-		Component: NotFoundPage,
+		path: _router.video,
+		Component: () => <ShareView />,
+	},
+	{
+		path: _router.profile,
+		Component: () => <DashboardIndex />,
 	},
 ]);

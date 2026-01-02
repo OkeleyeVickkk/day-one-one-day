@@ -9,7 +9,7 @@ export default function NotFoundPage() {
 					<div className="text-6xl mb-4">😵</div>
 					<h1 className="text-3xl font-bold text-gray-900 mb-2">404 - Page Not Found</h1>
 					<p className="text-gray-600 mb-6">Sorry, the page you're looking for doesn't exist or has been moved.</p>
-					<div className="space-y-3">
+					<div className="flex items-center gap-4 justify-center">
 						<ActionButton href={_router.landing.index}>Go to Homepage</ActionButton>
 						<ActionButton href={_router.dashboard.index} variant="outline">
 							Go to Dashboard
